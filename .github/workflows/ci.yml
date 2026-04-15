@@ -1,0 +1,76 @@
+name: MLOps CI Pipeline
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+      - develop
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 1 : Entraînement du modèle
+  # Déclenché sur feature/* ET develop
+  # ─────────────────────────────────────────────────────────────────
+  train:
+    name: Train model
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Train model
+        run: python train.py
+
+      - name: Show metrics
+        run: cat artifacts/metrics.json
+
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-artifact
+          path: artifacts/
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 2 : Build & Push Docker image
+  # Déclenché UNIQUEMENT sur develop
+  # ─────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push Docker image
+    runs-on: ubuntu-latest
+    needs: train
+    if: github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model-artifact
+          path: artifacts/
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/mlops-wine:${{ github.sha }} \
+                       -t ${{ secrets.DOCKERHUB_USERNAME }}/mlops-wine:latest .
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/mlops-wine:${{ github.sha }}
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/mlops-wine:latest
